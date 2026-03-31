@@ -9,9 +9,12 @@ from mathutils import Vector, Euler
 # ==========================================
 # 1. 全局配置 (Configuration)
 # ==========================================
-NUM_IMAGES = 10000
+# 💡 强烈建议：第一次先跑 10 张测试！确认标签和图片完美后，再改成 10000
+NUM_IMAGES = 10 
+
+# ⚠️ 请确保将 "your_username" 替换为您实际的 Linux 用户名（如果就是 shark 则无需修改）
 OUTPUT_DIR = "/home/shark/model_train/dataset"
-BG_IMAGES_DIR = "/home/shark/model_train/backgrounds" # 请确保此文件夹内有真实的背景图片
+BG_IMAGES_DIR = "/home/shark/model_train/backgrounds" 
 CLASS_ID = 0
 
 # 确保输出目录存在
@@ -34,6 +37,11 @@ if not camera or not ore_model or not light_main or any(e is None for e in empti
 # ==========================================
 # 2. 初始化设置 (Initialization)
 # ==========================================
+# 🌟 强制设置渲染分辨率为 640x640 (完美适配 YOLO 默认输入，防止被压缩变形)
+scene.render.resolution_x = 640
+scene.render.resolution_y = 640
+scene.render.resolution_percentage = 100
+
 # 相机设置为完美的针孔相机 (无畸变，用于训练 YOLO)
 camera.data.type = 'PERSP'
 camera.data.lens = 35  # 35mm 焦距
@@ -216,4 +224,3 @@ if __name__ == "__main__":
             print(f"✅ 已完成: {i + 1} / {NUM_IMAGES}")
 
     print("🎉 数据集生成完毕！请前往 dataset 目录查看。")
-
