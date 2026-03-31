@@ -67,19 +67,16 @@ def randomize_material(obj):
 
 def randomize_lighting():
     """随机化主光源和辅助光源"""
-    # 随机化主光源位置和强度
     light_main.location = (random.uniform(-5, 5), random.uniform(-5, 5), random.uniform(2, 8))
     if light_main.data.type in ['POINT', 'SPOT']:
         light_main.data.energy = random.uniform(500, 2000)
     elif light_main.data.type == 'SUN':
          light_main.data.energy = random.uniform(1, 10)
 
-    # 清理旧的辅助光源
     for obj in bpy.data.objects:
         if obj.name.startswith("Aux_Light"):
             bpy.data.objects.remove(obj, do_unlink=True)
             
-    # 随机生成 1-3 个辅助光源
     for i in range(random.randint(1, 3)):
         light_data = bpy.data.lights.new(name=f"Aux_Light_Data_{i}", type='POINT')
         light_data.energy = random.uniform(100, 1000)
@@ -97,22 +94,18 @@ def setup_background_image():
     tree = scene.node_tree
     tree.nodes.clear()
         
-    # 创建节点
     render_layers = tree.nodes.new('CompositorNodeRLayers')
     composite = tree.nodes.new('CompositorNodeComposite')
     alpha_over = tree.nodes.new('CompositorNodeAlphaOver')
     scale_node = tree.nodes.new('CompositorNodeScale')
     image_node = tree.nodes.new('CompositorNodeImage')
     
-    # 设置缩放节点以适应渲染尺寸
     scale_node.space = 'RENDER_SIZE'
     
-    # 随机加载图片
     bg_path = random.choice(bg_images)
     img = bpy.data.images.load(bg_path)
     image_node.image = img
     
-    # 连接节点：Image -> Scale -> Alpha Over (背景层)；Render -> Alpha Over (前景层)
     tree.links.new(image_node.outputs['Image'], scale_node.inputs['Image'])
     tree.links.new(scale_node.outputs['Image'], alpha_over.inputs[1])
     tree.links.new(render_layers.outputs['Image'], alpha_over.inputs[2])
@@ -120,17 +113,15 @@ def setup_background_image():
 
 def randomize_camera_pose(camera, target_obj):
     """相机球面漫游采样，并强制对准矿石"""
-    radius = random.uniform(0.5, 2.5)          # 距离
-    azimuth = random.uniform(0, 2 * math.pi)   # 方位角 (360度)
-    elevation = random.uniform(0.1, math.pi/2) # 高度角 (避免钻入地下)
+    radius = random.uniform(0.5, 2.5)          # 距离 0.5m ~ 2.5m
+    azimuth = random.uniform(0, 2 * math.pi)   # 方位角 0 ~ 360度
+    elevation = random.uniform(0.1, math.pi/2) # 高度角，避免钻入地下
 
-    # 球面转笛卡尔坐标
     x = radius * math.cos(elevation) * math.cos(azimuth)
     y = radius * math.cos(elevation) * math.sin(azimuth)
     z = radius * math.sin(elevation)
     camera.location = (x, y, z)
 
-    # 强制对准约束
     constraint_name = "Auto_Track_To"
     track_constraint = camera.constraints.get(constraint_name)
     if not track_constraint:
@@ -139,6 +130,20 @@ def randomize_camera_pose(camera, target_obj):
         track_constraint.target = target_obj
         track_constraint.track_axis = 'TRACK_NEGATIVE_Z'
         track_constraint.up_axis = 'UP_Y'
+
+def randomize_ore_pose(ore_model, camera):
+    """随机化矿石的 3D 旋转姿态，并随机偏移相机的 2D 画面中心"""
+    # 1. 让矿石在 3D 空间中全向翻滚
+    ore_model.rotation_euler = (
+        random.uniform(0, 2 * math.pi),
+        random.uniform(0, 2 * math.pi),
+        random.uniform(0, 2 * math.pi)
+    )
+    
+    # 2. 随机偏移相机镜头的 2D 中心，打破“目标永远居中”的魔咒
+    # 偏移量限制在 -0.3 到 0.3 之间，防止矿石完全跑出画面外
+    camera.data.shift_x = random.uniform(-0.3, 0.3)
+    camera.data.shift_y = random.uniform(-0.3, 0.3)
 
 # ==========================================
 # 4. 标注生成逻辑 (Annotation)
@@ -150,10 +155,9 @@ def get_yolo_annotation(scene, camera, empties):
     y_coords = []
     
     for empty in empties:
-        # 获取 3D 世界坐标到 2D 相机视图的归一化坐标
         coords_2d = bpy_extras.object_utils.world_to_camera_view(scene, camera, empty.matrix_world.translation)
         
-        # Blender 原点在左下角，YOLO 原点在左上角，必须翻转 Y 轴！
+        # 翻转 Y 轴匹配 YOLO 坐标系
         x = coords_2d.x
         y = 1.0 - coords_2d.y
         
@@ -161,7 +165,7 @@ def get_yolo_annotation(scene, camera, empties):
         x_coords.append(x)
         y_coords.append(y)
         
-    # 计算 Bounding Box (并将其限制在 0~1 范围内，防止越界报错)
+    # 计算 Bounding Box 并限制在 0~1 范围内
     x_min = max(0.0, min(x_coords))
     x_max = min(1.0, max(x_coords))
     y_min = max(0.0, min(y_coords))
@@ -172,8 +176,6 @@ def get_yolo_annotation(scene, camera, empties):
     width = x_max - x_min
     height = y_max - y_min
     
-    # 组装 YOLO 字符串: class x_c y_c w h p0_x p0_y 2 p1_x p1_y 2 ...
-    # 尾部的 '2' 代表关键点可见且已标注
     anno_str = f"{CLASS_ID} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}"
     for kp in keypoints_2d:
         anno_str += f" {kp[0]:.6f} {kp[1]:.6f} 2"
@@ -187,13 +189,14 @@ if __name__ == "__main__":
     print(f"🚀 开始生成 {NUM_IMAGES} 张合成数据...")
     
     for i in range(NUM_IMAGES):
-        # 1. 执行所有域随机化
+        # 1. 执行所有域随机化 (材质、光照、背景、相机位姿、矿石姿态)
         randomize_material(ore_model)
         randomize_lighting()
         setup_background_image()
         randomize_camera_pose(camera, ore_model)
+        randomize_ore_pose(ore_model, camera)
         
-        # 强制更新视图层，确保相机约束和坐标计算正确
+        # 强制更新视图层，确保所有物理变换和约束生效
         bpy.context.view_layer.update()
         
         # 2. 设置文件路径并渲染图像
