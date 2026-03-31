@@ -1,0 +1,8 @@
+path: /home/shark/model_train/dataset
+train: images/train
+val: images/val
+
+names:
+  0: ore
+
+kpt_shape: [8, 3]

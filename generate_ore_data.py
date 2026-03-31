@@ -4,22 +4,60 @@ import math
 import random
 import os
 import glob
+import colorsys
 from mathutils import Vector, Euler
 
 # ==========================================
 # 1. 全局配置 (Configuration)
 # ==========================================
 # 💡 强烈建议：第一次先跑 10 张测试！确认标签和图片完美后，再改成 10000
-NUM_IMAGES = 10 
+NUM_IMAGES = 100
 
 # ⚠️ 请确保将 "your_username" 替换为您实际的 Linux 用户名（如果就是 shark 则无需修改）
 OUTPUT_DIR = "/home/shark/model_train/dataset"
 BG_IMAGES_DIR = "/home/shark/model_train/backgrounds" 
 CLASS_ID = 0
+TRAIN_RATIO = 0.8
+DATASET_YAML_PATH = os.path.join(os.path.dirname(OUTPUT_DIR), "ore_pose.yaml")
+DATASET_SPLITS = ("train", "val")
+IMAGE_OUTPUT_DIRS = {
+    split: os.path.join(OUTPUT_DIR, "images", split) for split in DATASET_SPLITS
+}
+LABEL_OUTPUT_DIRS = {
+    split: os.path.join(OUTPUT_DIR, "labels", split) for split in DATASET_SPLITS
+}
 
-# 确保输出目录存在
-os.makedirs(os.path.join(OUTPUT_DIR, "images"), exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DIR, "labels"), exist_ok=True)
+def ensure_dataset_structure():
+    """创建 YOLO 训练/验证集目录结构"""
+    for split in DATASET_SPLITS:
+        os.makedirs(IMAGE_OUTPUT_DIRS[split], exist_ok=True)
+        os.makedirs(LABEL_OUTPUT_DIRS[split], exist_ok=True)
+
+def write_dataset_yaml():
+    """生成 Ultralytics YOLO Pose 所需的数据集配置文件"""
+    yaml_content = (
+        f"path: {os.path.abspath(OUTPUT_DIR)}\n"
+        "train: images/train\n"
+        "val: images/val\n\n"
+        "names:\n"
+        f"  {CLASS_ID}: ore\n\n"
+        "kpt_shape: [8, 3]\n"
+    )
+
+    with open(DATASET_YAML_PATH, "w", encoding="utf-8") as f:
+        f.write(yaml_content)
+
+def get_dataset_split(index, total_count):
+    """按 8:2 比例返回当前样本属于 train 还是 val"""
+    if total_count <= 1:
+        return "train"
+
+    train_count = int(total_count * TRAIN_RATIO)
+    train_count = min(total_count - 1, max(1, train_count))
+    return "train" if index < train_count else "val"
+
+ensure_dataset_structure()
+write_dataset_yaml()
 
 # 获取场景和对象引用
 scene = bpy.context.scene
@@ -59,7 +97,7 @@ if not bg_images:
 # 3. 域随机化功能组 (Domain Randomization)
 # ==========================================
 def randomize_material(obj):
-    """随机化矿石材质的粗糙度和金属度"""
+    """随机化矿石材质的基础颜色、粗糙度和金属度"""
     if not obj.data.materials:
         mat = bpy.data.materials.new(name="Ore_Material")
         mat.use_nodes = True
@@ -70,6 +108,13 @@ def randomize_material(obj):
     bsdf = nodes.get("Principled BSDF")
     
     if bsdf:
+        # 使用极低饱和度和低亮度，让颜色更接近深灰到近黑的矿石质感
+        hue = random.random()
+        saturation = random.uniform(0.0, 0.12)
+        value = random.uniform(0.02, 0.16)
+        r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+
+        bsdf.inputs['Base Color'].default_value = (r, g, b, 1.0)
         bsdf.inputs['Roughness'].default_value = random.uniform(0.1, 0.9)
         bsdf.inputs['Metallic'].default_value = random.uniform(0.0, 1.0)
 
@@ -195,8 +240,14 @@ def get_yolo_annotation(scene, camera, empties):
 # ==========================================
 if __name__ == "__main__":
     print(f"🚀 开始生成 {NUM_IMAGES} 张合成数据...")
+    train_count = min(NUM_IMAGES - 1, max(1, int(NUM_IMAGES * TRAIN_RATIO))) if NUM_IMAGES > 1 else 1
+    val_count = max(0, NUM_IMAGES - train_count)
+    print(f"📁 数据集划分: train={train_count}, val={val_count}")
+    print(f"🗺️ 已生成数据集配置文件: {DATASET_YAML_PATH}")
     
     for i in range(NUM_IMAGES):
+        split = get_dataset_split(i, NUM_IMAGES)
+
         # 1. 执行所有域随机化 (材质、光照、背景、相机位姿、矿石姿态)
         randomize_material(ore_model)
         randomize_lighting()
@@ -209,12 +260,12 @@ if __name__ == "__main__":
         
         # 2. 设置文件路径并渲染图像
         image_filename = f"ore_{i:05d}.jpg"
-        scene.render.filepath = os.path.join(OUTPUT_DIR, "images", image_filename)
+        scene.render.filepath = os.path.join(IMAGE_OUTPUT_DIRS[split], image_filename)
         bpy.ops.render.render(write_still=True)
         
         # 3. 计算并保存 YOLO 标签
         yolo_str = get_yolo_annotation(scene, camera, empties)
-        label_filepath = os.path.join(OUTPUT_DIR, "labels", f"ore_{i:05d}.txt")
+        label_filepath = os.path.join(LABEL_OUTPUT_DIRS[split], f"ore_{i:05d}.txt")
         
         with open(label_filepath, "w") as f:
             f.write(yolo_str + "\n")

@@ -1,0 +1,17 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local editor / tool state
+.codex
+
+# Blender project assets kept locally
+*.blend
+
+# Dataset inputs and generated outputs
+backgrounds/
+dataset/
+runs/
+
+# Downloaded model weights
+*.pt
